@@ -12,12 +12,15 @@ class SentenceSelector(nn.Module):
         self.word_embedding.weight.data.copy_(torch.from_numpy(weight_matrix))
         self.word_embedding.weight.requires_grad = options.update_word_embeddings
         
-        self.char_embedding = nn.Embedding(options.char_vocab_size, options.char_embedding_size, padding_idx=options.char_pad_index, max_norm=None, norm_type=2, scale_grad_by_freq=False, sparse=False, _weight=None)
+        self.answer_sentence_encoder = SequenceEncoder(options, options.final_question_representation_size, options.total_word_embedding_size,attention_type=options.attention_type)
+        self.conditional_question_sentence_encoder =  SequenceEncoder(options, options.final_question_representation_size, options.total_word_embedding_size,attention_type=options.attention_type)
         
-        self.answer_sentence_encoder = SequenceEncoder(options, query_size_multiplier = 3)
-        self.conditional_question_sentence_encoder =  SequenceEncoder(options, query_size_multiplier = 2)
-        
-        self.char_cnn = nn.Conv1d(in_channels=options.char_embedding_size, 
+        if(options.use_char_embeddings):
+            self.char_embedding = nn.Embedding(options.char_vocab_size, options.char_embedding_size, padding_idx=options.char_pad_index, max_norm=None, norm_type=2, scale_grad_by_freq=False, sparse=False, _weight=None)
+
+            self.char_embedding.weight.requires_grad = True
+
+            self.char_cnn = nn.Conv1d(in_channels=options.char_embedding_size, 
                                   out_channels=options.char_embedding_size, 
                                   kernel_size=options.max_word_len, 
                                   stride=options.max_word_len, 
@@ -27,9 +30,8 @@ class SentenceSelector(nn.Module):
         
         self.options = options
         
-        self.attn_model = Attn(options,query_size_multiplier=3)
+        self.attn_model = Attn(options.bi_rnn_hidden_state * 2, options.final_question_representation_size, method=options.attention_type)
         
-#         self.h0 = nn.Parameter(torch.randn(2, options.batch_size, options.bi_rnn_hidden_state), requires_grad = False)
 
         
 
@@ -38,12 +40,16 @@ class SentenceSelector(nn.Module):
     
     
     def build_embedding(self,word_sequences_in, char_sequences_in):
-        char_embeddings = self.char_embedding(char_sequences_in)
-        char_embedding_through_cnn = self.char_cnn(char_embeddings.transpose(1,2))
-        char_level_word_embeddings = char_embedding_through_cnn.transpose(1,2)
-        words_embedded = self.word_embedding(word_sequences_in)
-        combined = torch.cat([words_embedded,char_level_word_embeddings],dim=-1)
-        return combined
+        if(self.options.use_char_embeddings):
+            char_embeddings = self.char_embedding(char_sequences_in)
+            char_embedding_through_cnn = self.char_cnn(char_embeddings.transpose(1,2))
+            char_level_word_embeddings = char_embedding_through_cnn.transpose(1,2)
+            words_embedded = self.word_embedding(word_sequences_in)
+            combined = torch.cat([words_embedded,char_level_word_embeddings],dim=-1)
+            return combined
+        else:
+            words_embedded = self.word_embedding(word_sequences_in)
+            return words_embedded
     
     def forward(self,data,rnn_hidden):
     # Embed everything at word level. embedded_words={}
@@ -64,26 +70,30 @@ class SentenceSelector(nn.Module):
 
         combined_embeddings_input["question"] = self.build_embedding(data["question_word"], data["question_char"])
         
-        combined_embeddings_input["history_0"] = self.build_embedding(data["history_word_0"], data["history_char_0"])
-        
-        combined_embeddings_input["history_1"] = self.build_embedding(data["history_word_1"], data["history_char_1"])
-        
         for i in range(self.options.max_para_len):
             combined_embeddings_input["sent_{}".format(i)] = self.build_embedding(data["sent_word_{}".format(i)], data["sent_char_{}".format(i)])
                 
         question1 = self.conditional_question_sentence_encoder(input=combined_embeddings_input["question"], bi_rnn_h0=rnn_hidden, query = None)
         
-        question1_extended = torch.cat([question1, 
-           torch.randn(batch_size,self.options.bi_rnn_hidden_state * 2, device=self.device )],dim=-1)
-                
-        history0_encoding = self.conditional_question_sentence_encoder(input=combined_embeddings_input["history_1"], bi_rnn_h0=rnn_hidden, query = question1_extended.unsqueeze(1))
         
-        q1_h0 = torch.cat([question1,history0_encoding],dim=-1)
-        
-        history1_encoding = self.conditional_question_sentence_encoder(input=combined_embeddings_input["history_1"], bi_rnn_h0=rnn_hidden, query = q1_h0.unsqueeze(1))
-        
-        
-        history_aware_question = torch.cat([q1_h0, history1_encoding],dim=-1)
+        #currently doesn't work if history_size != 0
+        if(self.options.history_size != 0):
+            combined_embeddings_input["history_0"] = self.build_embedding(data["history_word_0"], data["history_char_0"])
+
+            combined_embeddings_input["history_1"] = self.build_embedding(data["history_word_1"], data["history_char_1"])
+
+            question1_extended = torch.cat([question1, 
+               torch.randn(batch_size,self.options.bi_rnn_hidden_state * 2, device=self.device )],dim=-1)
+
+            history0_encoding = self.conditional_question_sentence_encoder(input=combined_embeddings_input["history_1"], bi_rnn_h0=rnn_hidden, query = question1_extended.unsqueeze(1))
+
+            q1_h0 = torch.cat([question1,history0_encoding],dim=-1)
+
+            history1_encoding = self.conditional_question_sentence_encoder(input=combined_embeddings_input["history_1"], bi_rnn_h0=rnn_hidden, query = q1_h0.unsqueeze(1))
+
+            history_aware_question = torch.cat([q1_h0, history1_encoding],dim=-1)
+        else:
+            history_aware_question = question1
         
         
         sent_reps = []
@@ -106,22 +116,20 @@ class SentenceSelector(nn.Module):
 
 
 class SequenceEncoder(nn.Module):
-    def __init__(self, options, query_size_multiplier = 1):
+    def __init__(self, options, query_size, input_size, attention_type):
         super(SequenceEncoder, self).__init__()
         
-        output_size = options.bi_rnn_hidden_state * 2
-        
-        input_size = options.total_word_embedding_size
-
         self.bigru = nn.GRU(input_size= input_size, hidden_size=options.bi_rnn_hidden_state, num_layers = options.num_rnn_layers, batch_first = True, dropout = options.recurrent_dropout, bidirectional=True)
+        
+        output_size = options.bi_rnn_hidden_state*2
 
         self.linear = nn.Linear(output_size, output_size, bias=True)
         self.activation = nn.Tanh()
         self.dropout = nn.Dropout(p=options.dropout, inplace=False)
         
-        self.fixed_query = nn.Parameter(torch.randn(1, 1, output_size*query_size_multiplier))
+        self.fixed_query = nn.Parameter(torch.randn(1, 1, query_size))
         
-        self.attn_model = Attn(options,query_size_multiplier=query_size_multiplier)
+        self.attn_model = Attn(output_size, query_size, method=attention_type)
     
     
     def forward(self, input, bi_rnn_h0, query = None):
@@ -140,18 +148,10 @@ class SequenceEncoder(nn.Module):
     
 # This class is adapted from the pytorch tutorial https://pytorch.org/tutorials/beginner/chatbot_tutorial.html
 class Attn(torch.nn.Module):
-    def __init__(self, options, query_size_multiplier = 1):
-# query_size_multiplier is hacky. It is used to caclulate the size of the weight
-# matrix for attention. Assumption:  the encoder states are of size 
-# options.bi_rnn_hidden_state * 2 and the query is of size 
-# options.bi_rnn_hidden_state + options.bi_rnn_hidden_state * query_size_multiplier. The last quantity gives 
-# the size of the concatenation of the encoder state and query
-        
-# Attention methods other than 'concat' may not work for query_size_multiplier != 1
+    def __init__(self, size_of_things_to_attend_to, size_of_query, method):
 
         super(Attn, self).__init__()
-        method = options.attention_type
-        hidden_size = options.bi_rnn_hidden_state * 2
+        hidden_size = size_of_things_to_attend_to
         self.method = method
         if self.method not in ['dot', 'general', 'concat']:
             raise ValueError(self.method, "is not an appropriate attention method.")
@@ -159,8 +159,8 @@ class Attn(torch.nn.Module):
         if self.method == 'general':
             self.attn = torch.nn.Linear(self.hidden_size, hidden_size)
         elif self.method == 'concat':
-            self.attn = torch.nn.Linear(self.hidden_size + self.hidden_size * query_size_multiplier, hidden_size)
-            self.v = torch.nn.Parameter(torch.FloatTensor(hidden_size))
+            self.attn = torch.nn.Linear(size_of_things_to_attend_to + size_of_query , hidden_size)
+            self.v = torch.nn.Parameter(torch.randn(hidden_size))
 
     def dot_score(self, hidden, encoder_output):
         return torch.sum(hidden * encoder_output, dim=-1)
@@ -170,11 +170,6 @@ class Attn(torch.nn.Module):
         return torch.sum(hidden * energy, dim=2)
 
     def concat_score(self, hidden, encoder_output):
-        # this if-else block doesn't generalize. Careful while using this in another situation
-#         if(len(hidden_in.shape) == 2):
-#             hidden = hidden_in.unsqueeze(1)
-#         else:
-#             hidden = hidden
         energy = self.attn(torch.cat([hidden.expand(encoder_output.size(0), encoder_output.size(1), hidden.size(-1)), encoder_output],dim=-1)).tanh()
         return torch.sum(self.v * energy, dim=2)
 

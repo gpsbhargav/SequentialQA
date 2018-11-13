@@ -96,11 +96,7 @@ for epoch in range(options.epochs):
         gt_labels = batch["supporting_facts"].int().argmax(dim=1)
         
         loss = criterion(answer, gt_labels)
-        
-        # not sure if i can detach answer witout having to attach it later
-        answer_copy = answer
-        train_exact_match = accuracy_score(gt_labels.cpu().numpy(), answer_copy.detach().cpu().numpy().argmax(axis=1))
-        
+                
         if(torch.isnan(loss).item()):
             print("Loss became nan in iteration {}. Training stopped".format(iterations))
             stop_training_flag = True
@@ -119,7 +115,11 @@ for epoch in range(options.epochs):
         opt.step()
         
         
-        if iterations % options.log_every == 0:  
+        if iterations % options.log_every == 0:
+            # not sure if i can detach answer witout having to attach it later
+            answer_copy = answer
+            train_exact_match = accuracy_score(gt_labels.cpu().numpy(), answer_copy.detach().cpu().numpy().argmax(axis=1))
+            
             avg_loss = total_loss_since_last_time.item()/options.log_every
             total_loss_since_last_time = 0
 #             answer_sigmoid = torch.sigmoid(answer)
@@ -127,18 +127,17 @@ for epoch in range(options.epochs):
 #             train_F1 = f1_score(batch[1].cpu().numpy(), answer_labels.cpu().numpy(), average='micro')
 #             train_exact_match = accuracy_score(batch[1].cpu().numpy(), answer_labels.cpu().numpy())
 
-            train_F1 = 0
             
             print(routine_log_template.format(time.time()-start, epoch+1, options.epochs, iterations,avg_loss, loss.item(), train_exact_match))
         
         
-        if iterations % options.save_every == 0:
-            snapshot_prefix = os.path.join(options.save_path, 'snapshot')
-            snapshot_path = snapshot_prefix + '_f1_{:.4f}_loss_{:.6f}_iter_{}_model.pt'.format(train_F1, loss.item(), iterations)
-            torch.save(model, snapshot_path)
-            for f in glob.glob(snapshot_prefix + '*'):
-                if f != snapshot_path:
-                    os.remove(f)
+            if iterations % options.save_every == 0:
+                snapshot_prefix = os.path.join(options.save_path, 'snapshot')
+                snapshot_path = snapshot_prefix + '_EM_{:.4f}_loss_{:.6f}_iter_{}_model.pt'.format(train_exact_match, loss.item(), iterations)
+                torch.save(model, snapshot_path)
+                for f in glob.glob(snapshot_prefix + '*'):
+                    if f != snapshot_path:
+                        os.remove(f)
      
     if(stop_training_flag == True):
         break
@@ -193,6 +192,7 @@ for epoch in range(options.epochs):
     
     if(num_epochs_since_last_best_dev_acc > options.early_stopping_patience):
         print("Training stopped because dev acc hasn't increased in {} epochs.".format(options.early_stopping_patience))
+        print("Best dev set accuracy = {}".format(best_dev_exact_match))
         break
 
         
