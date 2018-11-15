@@ -7,13 +7,19 @@ class SentenceSelector(nn.Module):
     def __init__(self, options, weight_matrix, device):
         super(SentenceSelector, self).__init__()
         
+        self.options = options
+        
         self.device = device
         self.word_embedding = nn.Embedding(options.word_vocab_size, options.word_embedding_size, padding_idx=None, max_norm=None, norm_type=2, scale_grad_by_freq=False, sparse=False, _weight=None)
         self.word_embedding.weight.data.copy_(torch.from_numpy(weight_matrix))
         self.word_embedding.weight.requires_grad = options.update_word_embeddings
         
-        self.answer_sentence_encoder = SequenceEncoder(options, options.final_question_representation_size, options.total_word_embedding_size, attention_type='concat')
-        self.conditional_question_sentence_encoder =  SequenceEncoder(options, options.final_question_representation_size, options.total_word_embedding_size, attention_type='concat')
+        self.answer_sentence_encoder = SequenceEncoder(options, options.final_question_representation_size, options.total_word_embedding_size, attention_type='dot')
+        
+        self.question_encoder =  SequenceEncoder(options, options.total_word_embedding_size, options.total_word_embedding_size, attention_type='dot')
+        
+        self.history_item_encoder =  SequenceEncoder(options, options.total_word_embedding_size, options.total_word_embedding_size, attention_type='dot')
+        
         
         if(options.use_char_embeddings):
             self.char_embedding = nn.Embedding(options.char_vocab_size, options.char_embedding_size, padding_idx=options.char_pad_index, max_norm=None, norm_type=2, scale_grad_by_freq=False, sparse=False, _weight=None)
@@ -28,15 +34,20 @@ class SentenceSelector(nn.Module):
         
         self.bigru = nn.GRU(input_size= options.bi_rnn_hidden_state * 2, hidden_size=options.bi_rnn_hidden_state, num_layers = options.num_rnn_layers, batch_first = True, dropout = options.recurrent_dropout, bidirectional=True)
         
-        self.options = options
         
-        self.attn_model = Attn(options, options.bi_rnn_hidden_state * 2, options.final_question_representation_size, method='concat')
+        self.question_linear_layer = nn.Linear(options.bi_rnn_hidden_state * 2 * 2, options.bi_rnn_hidden_state * 2, bias=True)
+        
+        if(self.options.history_size != 0):
+            self.history_attn_model = Attn(options, options.bi_rnn_hidden_state * 2, options.bi_rnn_hidden_state * 2, method='dot')
+        
+        self.sentence_selection_attn_model = Attn(options, options.bi_rnn_hidden_state * 2, options.final_question_representation_size, method='dot')
+        
         
 
         
 
-    def get_first_hidden(self,batch_size, device):
-        return torch.randn(2, batch_size, self.options.bi_rnn_hidden_state, device = device)
+    def get_first_hidden(self, batch_size, device):
+        return torch.randn(self.options.num_rnn_layers * 2, batch_size, self.options.bi_rnn_hidden_state, device = device)
     
     
     def build_embedding(self,word_sequences_in, char_sequences_in):
@@ -52,18 +63,7 @@ class SentenceSelector(nn.Module):
             return words_embedded
     
     def forward(self,data,rnn_hidden):
-    # Embed everything at word level. embedded_words={}
-    # Embed everything at char level.Run through embedding layer and then CNN embedded_chars={}
-    # Concatenate both. combined_embeddings_input={}
-    # Encode question1 to get q1
-    # Encode history1 based on question1 to get h1
-    # Concatenate q1 and h1
-    # Encode history2 based on [q1;h1] to get h2
-    # concatenate all to get [q1;h1;h2]. call it history_aware_question
-    # Encode all sentences in "combined_embeddings_input" based on history_aware_question.
-    # Run the above through a biGru to get final_sentence_representations
-    # Return un-normalized attention scores between history_aware_question and final_sentence_representations
-    
+
         batch_size = len(data["question_word"])
         
         combined_embeddings_input = {}
@@ -73,28 +73,33 @@ class SentenceSelector(nn.Module):
         for i in range(self.options.max_para_len):
             combined_embeddings_input["sent_{}".format(i)] = self.build_embedding(data["sent_word_{}".format(i)], data["sent_char_{}".format(i)])
                 
-        question1 = self.conditional_question_sentence_encoder(input=combined_embeddings_input["question"], bi_rnn_h0=rnn_hidden, query = None)
+        question = self.question_encoder(input=combined_embeddings_input["question"], bi_rnn_h0=rnn_hidden, query = None)
         
-        
-        #currently doesn't work if history_size != 0
+
         if(self.options.history_size != 0):
-            combined_embeddings_input["history_0"] = self.build_embedding(data["history_word_0"], data["history_char_0"])
-
-            combined_embeddings_input["history_1"] = self.build_embedding(data["history_word_1"], data["history_char_1"])
-
-            question1_extended = torch.cat([question1, 
-               torch.randn(batch_size,self.options.bi_rnn_hidden_state * 2, device=self.device )],dim=-1)
-
-            history0_encoding = self.conditional_question_sentence_encoder(input=combined_embeddings_input["history_1"], bi_rnn_h0=rnn_hidden, query = question1_extended.unsqueeze(1))
-
-            q1_h0 = torch.cat([question1,history0_encoding],dim=-1)
-
-            history1_encoding = self.conditional_question_sentence_encoder(input=combined_embeddings_input["history_1"], bi_rnn_h0=rnn_hidden, query = q1_h0.unsqueeze(1))
-
-            history_aware_question = torch.cat([q1_h0, history1_encoding],dim=-1)
+            history_reps_list = []
+            
+            for i in range(self.options.history_size):
+                history_embedding = self.build_embedding(data["history_word_{}".format(i)], data["history_char_{}".format(i)])
+                history_encoding = self.history_item_encoder(input=history_embedding, bi_rnn_h0= rnn_hidden, query = question.unsqueeze(1))
+                history_reps_list.append(history_encoding)
+             
+            if(self.options.history_size > 1):
+                history_reps = torch.stack(history_reps_list,dim=1)   
+                attn_weights = self.history_attn_model(question.unsqueeze(1), history_reps)
+                final_history_rep = attn_weights.bmm(history_reps)
+                final_history_rep = final_history_rep.flatten(1)
+                final_history_rep = torch.tanh(final_history_rep)
+            else:
+                final_history_rep = history_reps_list[0]
+            
+            
+            history_aware_question = torch.cat([question,final_history_rep],dim=-1)
+            
+            history_aware_question = self.question_linear_layer(history_aware_question)
+            history_aware_question = torch.relu(history_aware_question)
         else:
-            history_aware_question = question1
-        
+            history_aware_question = question
         
         sent_reps = []
         for i in range(self.options.max_para_len):
@@ -107,7 +112,7 @@ class SentenceSelector(nn.Module):
                 
         paragraph_rep, _ = self.bigru(paragraph_rep, rnn_hidden)
         
-        raw_scores = self.attn_model(history_aware_question.unsqueeze(1), paragraph_rep,normalize_scores=False)
+        raw_scores = self.sentence_selection_attn_model(history_aware_question.unsqueeze(1), paragraph_rep, normalize_scores=False)
         
         return raw_scores
         

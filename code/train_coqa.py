@@ -12,7 +12,7 @@ import numpy as np
 from sklearn.metrics import f1_score, accuracy_score
 
 import utils
-from model import SentenceSelector
+from model_fixed_size_query import SentenceSelector
 import options
 
 import pdb
@@ -45,7 +45,7 @@ print("===============================")
 
 
 criterion = nn.CrossEntropyLoss()
-opt = O.Adam(model.parameters(), lr=options.lr)
+opt = O.Adam(model.parameters(), lr=options.lr,  weight_decay=options.weight_decay)
 
 iterations = 0
 start = time.time()
@@ -101,7 +101,7 @@ for epoch in range(options.epochs):
             print("Loss became nan in iteration {}. Training stopped".format(iterations))
             stop_training_flag = True
             break
-        elif(loss.item() < 0.00000000001):
+        elif(loss.item() < 0.0000000000001):
             print("Loss is too low. Stopping training")
             stop_training_flag = True
             break
@@ -111,7 +111,8 @@ for epoch in range(options.epochs):
         total_loss_since_last_time += loss
         
         loss.backward()
-        clip_grad_norm_(model.parameters(),max_norm=options.max_gradient_norm) 
+        if(options.max_gradient_norm is not None):
+            clip_grad_norm_(model.parameters(),max_norm=options.max_gradient_norm) 
         opt.step()
         
         

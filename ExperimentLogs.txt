@@ -4,14 +4,32 @@ Dev EM=48.92. Train acc ~65 to 75
 Word only, 0 history, no regularization, max grad norm=1. lr=0.001. attention=concat
 Dev EM=43. Train acc ~65 to 75
 ------------------------
+Word only, 0 history, no regularization. lr=0.001. attention=concat (num_units = 150)
+Dev EM=45. Train acc ~65 to 75
 ------------------------
+word only, 0 history, no regularization, lr=0.001, attention=concat for ans encoder and sentence selection (num_units = 150)
+Dev em = 41. Train acc ~55 to 67
 ------------------------
+word only, 0 history, no regularization, lr=0.001, attention=concat for ans encoder and sentence selection (num_units = 150)
+Dev em = 38. Train acc ~60
 ------------------------
+word only, 1 history, no regularization, lr=0.001, attention=dot. 
+Dev em = 46. Train acc ~60 to 70
 ------------------------
+word only, 1 history, no regularization, lr=0.005, attention=dot. Weight decay=0.001
+Dev em = 26.5. Train acc ~15
 ------------------------
+word only, 1 history, no regularization, lr=0.001, attention=dot. num_birnn_layers=2
+Dev em = 40. Train acc 55 to 65
 ------------------------
+word only, 2 history, no regularization, lr=0.001, attention=dot. num_birnn_layers=2
+Dev em = 42.9. Train acc ~70
 ------------------------
+word only, 2 history, recurrent_dropout=0.4, lr=0.001, attention=dot. num_birnn_layers=2
+Dev em = 39.4. Train acc ~50.
 ------------------------
+word only, 2 history, recurrent_dropout=0.2, lr=0.001, attention=dot. num_birnn_layers=2
+Dev em =  Train acc 
 ------------------------
 ------------------------
 ------------------------
