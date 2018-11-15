@@ -29,7 +29,7 @@ word only, 2 history, recurrent_dropout=0.4, lr=0.001, attention=dot. num_birnn_
 Dev em = 39.4. Train acc ~50.
 ------------------------
 word only, 2 history, recurrent_dropout=0.2, lr=0.001, attention=dot. num_birnn_layers=2
-Dev em =  Train acc 
+Dev em =  43.32. Train acc 60 to 65
 ------------------------
 ------------------------
 ------------------------
