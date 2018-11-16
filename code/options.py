@@ -2,12 +2,12 @@ class CoqaOptions:
     def __init__(self):
         self.epochs = 30
         self.batch_size = 128
-        self.bi_rnn_hidden_state = 150   # 150 forward and 150 backward =  300D hidden state
         self.num_rnn_layers = 2
-        self.linear_layer_in_size = self.bi_rnn_hidden_state * 2
         self.word_embedding_size = 300
         self.char_embedding_size = 50
         self.use_char_embeddings = False
+        self.bi_rnn_hidden_state = 150  # 150 forward and 150 backward =  300D hidden state 
+        self.linear_layer_in_size = self.bi_rnn_hidden_state * 2
         self.history_size = 2
         self.max_sent_len = 40
         self.max_para_len = 25
@@ -20,7 +20,7 @@ class CoqaOptions:
         self.recurrent_dropout = 0.2
         self.lr = 0.001
         self.weight_decay = 0
-        self.max_gradient_norm = None
+        self.max_gradient_norm = 1
         self.attention_linear_layer_out_dim = self.bi_rnn_hidden_state
         self.update_word_embeddings = False
         self.data_pkl_path = "../data/coqa/"

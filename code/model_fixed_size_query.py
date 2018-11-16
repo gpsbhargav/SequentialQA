@@ -132,7 +132,7 @@ class SequenceEncoder(nn.Module):
         self.activation = nn.Tanh()
         self.dropout = nn.Dropout(p=options.dropout, inplace=False)
         
-        self.fixed_query = nn.Parameter(torch.randn(1, 1, query_size))
+        self.fixed_query = nn.Parameter(torch.randn(1, 1, query_size, requires_grad=True))
         
         self.attn_model = Attn(options, output_size, query_size, method=attention_type)
     
@@ -165,7 +165,7 @@ class Attn(torch.nn.Module):
             self.attn = torch.nn.Linear(self.hidden_size, hidden_size)
         elif self.method == 'concat':
             self.attn = torch.nn.Linear(size_of_things_to_attend_to + size_of_query , options.attention_linear_layer_out_dim)
-            self.v = torch.nn.Parameter(torch.randn(options.attention_linear_layer_out_dim))
+            self.v = torch.nn.Parameter(torch.randn(options.attention_linear_layer_out_dim, requires_grad=True))
 
     def dot_score(self, hidden, encoder_output):
         return torch.sum(hidden * encoder_output, dim=-1)
