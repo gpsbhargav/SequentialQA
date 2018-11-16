@@ -18,7 +18,7 @@ class SentenceSelector(nn.Module):
         
         self.question_encoder =  SequenceEncoder(options, options.total_word_embedding_size, options.total_word_embedding_size, attention_type='dot')
         
-        self.history_item_encoder =  SequenceEncoder(options, options.total_word_embedding_size, options.total_word_embedding_size, attention_type='dot')
+        self.history_item_encoder =  SequenceEncoder(options, options.total_word_embedding_size, options.total_word_embedding_size, attention_type='concat')
         
         
         if(options.use_char_embeddings):
@@ -32,7 +32,7 @@ class SentenceSelector(nn.Module):
                                   stride=options.max_word_len, 
                                   padding=0, dilation=1, groups=1, bias=True)
         
-        self.bigru = nn.GRU(input_size= options.bi_rnn_hidden_state * 2, hidden_size=options.bi_rnn_hidden_state, num_layers = options.num_rnn_layers, batch_first = True, dropout = options.recurrent_dropout, bidirectional=True)
+        self.rnn = nn.LSTM(input_size= options.bi_rnn_hidden_state * 2, hidden_size=options.bi_rnn_hidden_state, num_layers = options.num_rnn_layers, batch_first = True, dropout = options.recurrent_dropout, bidirectional=True)
         
         
         self.question_linear_layer = nn.Linear(options.bi_rnn_hidden_state * 2 * 2, options.bi_rnn_hidden_state * 2, bias=True)
@@ -47,7 +47,7 @@ class SentenceSelector(nn.Module):
         
 
     def get_first_hidden(self, batch_size, device):
-        return torch.randn(self.options.num_rnn_layers * 2, batch_size, self.options.bi_rnn_hidden_state, device = device)
+        return (torch.randn(self.options.num_rnn_layers * 2, batch_size, self.options.bi_rnn_hidden_state, device = device),torch.randn(self.options.num_rnn_layers * 2, batch_size, self.options.bi_rnn_hidden_state, device = device))
     
     
     def build_embedding(self,word_sequences_in, char_sequences_in):
@@ -61,6 +61,12 @@ class SentenceSelector(nn.Module):
         else:
             words_embedded = self.word_embedding(word_sequences_in)
             return words_embedded
+        
+    def construct_mask(self, tensor_in, padding_index = 0):
+        mask = tensor_in == padding_index
+        float_mask = mask.type(dtype=torch.float32)
+        float_mask =  float_mask.masked_fill(mask=mask, value=-1e-20)
+        return float_mask
     
     def forward(self,data,rnn_hidden):
 
@@ -110,7 +116,7 @@ class SentenceSelector(nn.Module):
         
         paragraph_rep = torch.stack(sent_reps,dim=1)
                 
-        paragraph_rep, _ = self.bigru(paragraph_rep, rnn_hidden)
+        paragraph_rep, _ = self.rnn(paragraph_rep, rnn_hidden)
         
         raw_scores = self.sentence_selection_attn_model(history_aware_question.unsqueeze(1), paragraph_rep, normalize_scores=False)
         
@@ -124,7 +130,7 @@ class SequenceEncoder(nn.Module):
     def __init__(self, options, query_size, input_size, attention_type):
         super(SequenceEncoder, self).__init__()
         
-        self.bigru = nn.GRU(input_size= input_size, hidden_size=options.bi_rnn_hidden_state, num_layers = options.num_rnn_layers, batch_first = True, dropout = options.recurrent_dropout, bidirectional=True)
+        self.rnn = nn.LSTM(input_size= input_size, hidden_size=options.bi_rnn_hidden_state, num_layers = options.num_rnn_layers, batch_first = True, dropout = options.recurrent_dropout, bidirectional=True)
         
         output_size = options.bi_rnn_hidden_state*2
 
@@ -137,13 +143,13 @@ class SequenceEncoder(nn.Module):
         self.attn_model = Attn(options, output_size, query_size, method=attention_type)
     
     
-    def forward(self, input, bi_rnn_h0, query = None):
+    def forward(self, input, bi_rnn_h0, mask = None, query = None):
         if(query is None):
             query = self.fixed_query
-        seq_rep, _ = self.bigru(input, bi_rnn_h0)
+        seq_rep, _ = self.rnn(input, bi_rnn_h0)
         seq_rep_translated = self.linear(seq_rep)
         seq_rep_translated = self.activation(seq_rep_translated)
-        attn_weights = self.attn_model(query, seq_rep_translated)
+        attn_weights = self.attn_model(query, seq_rep_translated, mask)
         final_seq_rep = attn_weights.bmm(seq_rep_translated)
         final_seq_rep = final_seq_rep.flatten(1)
         return final_seq_rep
@@ -162,7 +168,7 @@ class Attn(torch.nn.Module):
             raise ValueError(self.method, "is not an appropriate attention method.")
         self.hidden_size = hidden_size
         if self.method == 'general':
-            self.attn = torch.nn.Linear(self.hidden_size, hidden_size)
+            self.attn = torch.nn.Linear(hidden_size, hidden_size)
         elif self.method == 'concat':
             self.attn = torch.nn.Linear(size_of_things_to_attend_to + size_of_query , options.attention_linear_layer_out_dim)
             self.v = torch.nn.Parameter(torch.randn(options.attention_linear_layer_out_dim, requires_grad=True))
@@ -178,7 +184,7 @@ class Attn(torch.nn.Module):
         energy = self.attn(torch.cat([hidden.expand(encoder_output.size(0), encoder_output.size(1), hidden.size(-1)), encoder_output],dim=-1)).tanh()
         return torch.sum(self.v * energy, dim=2)
 
-    def forward(self, hidden, encoder_outputs,normalize_scores=True):
+    def forward(self, hidden, encoder_outputs, mask = None, normalize_scores=True):
         # Calculate the attention weights (energies) based on the given method
         if self.method == 'general':
             attn_energies = self.general_score(hidden, encoder_outputs)
@@ -189,6 +195,9 @@ class Attn(torch.nn.Module):
 
         # Transpose max_length and batch_size dimensions
         # attn_energies = attn_energies.t()
+        
+        if(mask is not None):
+            attn_energies = attn_energies + mask
         
         if(normalize_scores):
             # Return the softmax normalized probability scores (with added dimension)

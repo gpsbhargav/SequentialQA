@@ -2,7 +2,7 @@ class CoqaOptions:
     def __init__(self):
         self.epochs = 30
         self.batch_size = 128
-        self.num_rnn_layers = 2
+        self.num_rnn_layers = 1
         self.word_embedding_size = 300
         self.char_embedding_size = 50
         self.use_char_embeddings = False

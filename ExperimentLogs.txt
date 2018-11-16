@@ -41,9 +41,10 @@ word only, 2 history, lr=0.001, max grad norm=1, attention=dot. num_birnn_layers
 Dev em =  49.8. Train acc 70 to 78
 ------------------------
 word only, 2 history, recurrent_dropout=0.2, lr=0.001, max grad norm=1, attention=dot. num_birnn_layers=2
+Dev em =  44.9. Train acc 60 to 70
+------------------------
+word only, 2 history, lr=0.001, max grad norm=1, attention=additive for history,dot everywhere else. num_birnn_layers=1
 Dev em =  . Train acc 
-------------------------
-------------------------
 ------------------------
 ------------------------
 ------------------------
