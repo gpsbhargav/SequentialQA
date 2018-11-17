@@ -18,7 +18,7 @@ class SentenceSelector(nn.Module):
         
         self.question_encoder =  SequenceEncoder(options, options.total_word_embedding_size, options.total_word_embedding_size, attention_type='dot')
         
-        self.history_item_encoder =  SequenceEncoder(options, options.total_word_embedding_size, options.total_word_embedding_size, attention_type='concat')
+        self.history_item_encoder =  SequenceEncoder(options, options.total_word_embedding_size, options.total_word_embedding_size, attention_type='multiplicative')
         
         
         if(options.use_char_embeddings):
@@ -38,7 +38,7 @@ class SentenceSelector(nn.Module):
         self.question_linear_layer = nn.Linear(options.bi_rnn_hidden_state * 2 * 2, options.bi_rnn_hidden_state * 2, bias=True)
         
         if(self.options.history_size != 0):
-            self.history_attn_model = Attn(options, options.bi_rnn_hidden_state * 2, options.bi_rnn_hidden_state * 2, method='dot')
+            self.history_attn_model = Attn(options, options.bi_rnn_hidden_state * 2, options.bi_rnn_hidden_state * 2, method='multiplicative')
         
         self.sentence_selection_attn_model = Attn(options, options.bi_rnn_hidden_state * 2, options.final_question_representation_size, method='dot')
         
@@ -68,7 +68,7 @@ class SentenceSelector(nn.Module):
         float_mask =  float_mask.masked_fill(mask=mask, value=-1e-20)
         return float_mask
     
-    def forward(self,data,rnn_hidden):
+    def forward(self, data, rnn_hidden):
 
         batch_size = len(data["question_word"])
         
@@ -76,10 +76,8 @@ class SentenceSelector(nn.Module):
 
         combined_embeddings_input["question"] = self.build_embedding(data["question_word"], data["question_char"])
         
-        for i in range(self.options.max_para_len):
-            combined_embeddings_input["sent_{}".format(i)] = self.build_embedding(data["sent_word_{}".format(i)], data["sent_char_{}".format(i)])
-                
-        question = self.question_encoder(input=combined_embeddings_input["question"], bi_rnn_h0=rnn_hidden, query = None)
+        mask = self.construct_mask(tensor_in=data["question_word"], padding_index = self.options.word_pad_index)        
+        question = self.question_encoder(input=combined_embeddings_input["question"], bi_rnn_h0=rnn_hidden, query = None, mask=mask)
         
 
         if(self.options.history_size != 0):
@@ -87,7 +85,8 @@ class SentenceSelector(nn.Module):
             
             for i in range(self.options.history_size):
                 history_embedding = self.build_embedding(data["history_word_{}".format(i)], data["history_char_{}".format(i)])
-                history_encoding = self.history_item_encoder(input=history_embedding, bi_rnn_h0= rnn_hidden, query = question.unsqueeze(1))
+                mask = self.construct_mask(tensor_in=data["history_word_{}".format(i)], padding_index = self.options.word_pad_index)
+                history_encoding = self.history_item_encoder(input=history_embedding, bi_rnn_h0= rnn_hidden, query = question.unsqueeze(1), mask=mask)
                 history_reps_list.append(history_encoding)
              
             if(self.options.history_size > 1):
@@ -109,8 +108,10 @@ class SentenceSelector(nn.Module):
         
         sent_reps = []
         for i in range(self.options.max_para_len):
-            sent_rep = self.answer_sentence_encoder(input=combined_embeddings_input["sent_{}".format(i)],
-                            bi_rnn_h0=rnn_hidden, query = history_aware_question.unsqueeze(1))
+            combined_embeddings_input = self.build_embedding(data["sent_word_{}".format(i)], data["sent_char_{}".format(i)])
+            mask = self.construct_mask(tensor_in=data["sent_word_{}".format(i)], padding_index = self.options.word_pad_index)
+            sent_rep = self.answer_sentence_encoder(input=combined_embeddings_input,
+                            bi_rnn_h0=rnn_hidden, query = history_aware_question.unsqueeze(1), mask=mask)
             sent_reps.append(sent_rep)
         
         
@@ -119,6 +120,11 @@ class SentenceSelector(nn.Module):
         paragraph_rep, _ = self.rnn(paragraph_rep, rnn_hidden)
         
         raw_scores = self.sentence_selection_attn_model(history_aware_question.unsqueeze(1), paragraph_rep, normalize_scores=False)
+        
+        unpadded_paragraph_lengths = data["unpadded_passage_lengths"]
+        mask = self.construct_mask(unpadded_paragraph_lengths, padding_index = 0)
+        
+        raw_scores = raw_scores + mask
         
         return raw_scores
         
@@ -149,7 +155,7 @@ class SequenceEncoder(nn.Module):
         seq_rep, _ = self.rnn(input, bi_rnn_h0)
         seq_rep_translated = self.linear(seq_rep)
         seq_rep_translated = self.activation(seq_rep_translated)
-        attn_weights = self.attn_model(query, seq_rep_translated, mask)
+        attn_weights = self.attn_model(query, seq_rep_translated, mask=mask)
         final_seq_rep = attn_weights.bmm(seq_rep_translated)
         final_seq_rep = final_seq_rep.flatten(1)
         return final_seq_rep
@@ -164,11 +170,14 @@ class Attn(torch.nn.Module):
         super(Attn, self).__init__()
         hidden_size = size_of_things_to_attend_to
         self.method = method
-        if self.method not in ['dot', 'general', 'concat']:
+        if self.method not in ['dot', 'general', 'concat', 'multiplicative']:
             raise ValueError(self.method, "is not an appropriate attention method.")
         self.hidden_size = hidden_size
         if self.method == 'general':
             self.attn = torch.nn.Linear(hidden_size, hidden_size)
+        elif self.method == 'multiplicative':
+            self.attn = torch.nn.Linear(size_of_query , size_of_things_to_attend_to )
+            self.v = torch.nn.Parameter(torch.randn(size_of_things_to_attend_to, requires_grad=True))
         elif self.method == 'concat':
             self.attn = torch.nn.Linear(size_of_things_to_attend_to + size_of_query , options.attention_linear_layer_out_dim)
             self.v = torch.nn.Parameter(torch.randn(options.attention_linear_layer_out_dim, requires_grad=True))
@@ -183,6 +192,11 @@ class Attn(torch.nn.Module):
     def concat_score(self, hidden, encoder_output):
         energy = self.attn(torch.cat([hidden.expand(encoder_output.size(0), encoder_output.size(1), hidden.size(-1)), encoder_output],dim=-1)).tanh()
         return torch.sum(self.v * energy, dim=2)
+    
+    def multiplicative_score(self, hidden, encoder_output):
+        transformed_encoder_output = self.attn(encoder_output)
+        attention_scores = self.dot_score(hidden, transformed_encoder_output)
+        return attention_scores
 
     def forward(self, hidden, encoder_outputs, mask = None, normalize_scores=True):
         # Calculate the attention weights (energies) based on the given method
@@ -192,6 +206,8 @@ class Attn(torch.nn.Module):
             attn_energies = self.concat_score(hidden, encoder_outputs)
         elif self.method == 'dot':
             attn_energies = self.dot_score(hidden, encoder_outputs)
+        elif self.method == 'multiplicative':
+            attn_energies = self.multiplicative_score(hidden, encoder_outputs)
 
         # Transpose max_length and batch_size dimensions
         # attn_energies = attn_energies.t()

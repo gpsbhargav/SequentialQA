@@ -54,9 +54,13 @@ class Coqa(Dataset):
         
         out_dict =  {'question_word':np.array(question_word), 'question_char':np.array(question_char), 'supporting_facts':supporting_facts}
         
+        # include "unpadded_passage_lengths"
+        out_dict["unpadded_passage_lengths"] = self.dataset["unpadded_passage_lengths"][passage_index]
+        
         for i in range(len(self.dataset['passages_word'])):
             out_dict["sent_word_{}".format(i)] = self.dataset['passages_word'][i][passage_index]
             out_dict["sent_char_{}".format(i)] = self.dataset['passages_char'][i][passage_index]
+            
             
         for i,idx in enumerate(prev_indices):
             qa_word = self.dataset['questions_word'][idx] + self.dataset['answers_word'][idx]
