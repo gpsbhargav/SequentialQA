@@ -21,16 +21,18 @@ class SentenceSelector(nn.Module):
         self.history_item_encoder =  SequenceEncoder(options, options.total_word_embedding_size, options.total_word_embedding_size, attention_type='multiplicative')
         
         
-        if(options.use_char_embeddings):
-            self.char_embedding = nn.Embedding(options.char_vocab_size, options.char_embedding_size, padding_idx=options.char_pad_index, max_norm=None, norm_type=2, scale_grad_by_freq=False, sparse=False, _weight=None)
+        if(self.options.embedding_type == 'word_plus_char'):
+            self.char_embedding = nn.Embedding(options.char_vocab_size, options.trainable_embedding_size, padding_idx=options.char_pad_index, max_norm=None, norm_type=2, scale_grad_by_freq=False, sparse=False, _weight=None)
 
             self.char_embedding.weight.requires_grad = True
 
-            self.char_cnn = nn.Conv1d(in_channels=options.char_embedding_size, 
-                                  out_channels=options.char_embedding_size, 
+            self.char_cnn = nn.Conv1d(in_channels=options.trainable_embedding_size, 
+                                  out_channels=options.trainable_embedding_size, 
                                   kernel_size=options.max_word_len, 
                                   stride=options.max_word_len, 
                                   padding=0, dilation=1, groups=1, bias=True)
+        elif(self.options.embedding_type == 'two_channel_word'):
+            self.word_embedding_channel_2 = nn.Embedding(options.word_vocab_size, options.trainable_embedding_size, padding_idx=None, max_norm=None, norm_type=2, scale_grad_by_freq=False, sparse=False, _weight=None)
         
         self.rnn = nn.LSTM(input_size= options.bi_rnn_hidden_state * 2, hidden_size=options.bi_rnn_hidden_state, num_layers = options.num_rnn_layers, batch_first = True, dropout = options.recurrent_dropout, bidirectional=True)
         
@@ -42,6 +44,8 @@ class SentenceSelector(nn.Module):
         
         self.sentence_selection_attn_model = Attn(options, options.bi_rnn_hidden_state * 2, options.final_question_representation_size, method='dot')
         
+        self.dropout = nn.Dropout(p=options.dropout, inplace=False)
+        
         
 
         
@@ -51,17 +55,23 @@ class SentenceSelector(nn.Module):
     
     
     def build_embedding(self,word_sequences_in, char_sequences_in):
-        if(self.options.use_char_embeddings):
+        if(self.options.embedding_type == 'word_plus_char'):
             char_embeddings = self.char_embedding(char_sequences_in)
             char_embedding_through_cnn = self.char_cnn(char_embeddings.transpose(1,2))
             char_level_word_embeddings = char_embedding_through_cnn.transpose(1,2)
             words_embedded = self.word_embedding(word_sequences_in)
             combined = torch.cat([words_embedded,char_level_word_embeddings],dim=-1)
             return combined
+        elif(self.options.embedding_type == 'two_channel_word'):
+            words_embedded = self.word_embedding(word_sequences_in)
+            words_embedded_channel_2 = self.word_embedding_channel_2(word_sequences_in)
+            combined = torch.cat([words_embedded,words_embedded_channel_2],dim=-1)
+            return combined
         else:
             words_embedded = self.word_embedding(word_sequences_in)
             return words_embedded
         
+     
     def construct_mask(self, tensor_in, padding_index = 0):
         mask = tensor_in == padding_index
         float_mask = mask.type(dtype=torch.float32)
@@ -116,7 +126,9 @@ class SentenceSelector(nn.Module):
         
         
         paragraph_rep = torch.stack(sent_reps,dim=1)
-                
+        
+        paragraph_rep = self.dropout(paragraph_rep)
+        
         paragraph_rep, _ = self.rnn(paragraph_rep, rnn_hidden)
         
         raw_scores = self.sentence_selection_attn_model(history_aware_question.unsqueeze(1), paragraph_rep, normalize_scores=False)
@@ -153,6 +165,7 @@ class SequenceEncoder(nn.Module):
         if(query is None):
             query = self.fixed_query
         seq_rep, _ = self.rnn(input, bi_rnn_h0)
+        seq_rep = self.dropout(seq_rep)
         seq_rep_translated = self.linear(seq_rep)
         seq_rep_translated = self.activation(seq_rep_translated)
         attn_weights = self.attn_model(query, seq_rep_translated, mask=mask)

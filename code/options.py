@@ -4,10 +4,8 @@ class CoqaOptions:
         self.batch_size = 128
         self.num_rnn_layers = 1
         self.word_embedding_size = 300
-        self.char_embedding_size = 50
-        self.use_char_embeddings = False
-        self.bi_rnn_hidden_state = 150  # 150 forward and 150 backward =  300D hidden state 
-        self.linear_layer_in_size = self.bi_rnn_hidden_state * 2
+        self.trainable_embedding_size = 50  #channel 2 of embeddings. can be char level or word
+        self.embedding_type = 'word_only'  # one of 'two_channel_word', 'word_plus_char', 'word_only'
         self.history_size = 2
         self.max_sent_len = 40
         self.max_para_len = 25
@@ -16,12 +14,11 @@ class CoqaOptions:
         self.char_vocab_size = 592
         self.char_pad_index = 0
         self.word_pad_index = 0
-        self.dropout = 0.00001
+        self.dropout = 0.3
         self.recurrent_dropout = 0.2
         self.lr = 0.001
         self.weight_decay = 0
         self.max_gradient_norm = 1
-        self.attention_linear_layer_out_dim = self.bi_rnn_hidden_state
         self.update_word_embeddings = False
         self.data_pkl_path = "../data/coqa/"
         self.glove_store = "precomputed_glove.npy"
@@ -38,12 +35,16 @@ class CoqaOptions:
         
         assert(self.log_every < self.save_every)
         
-        if(self.use_char_embeddings):
-            self.total_word_embedding_size = self.word_embedding_size + self.char_embedding_size
+        if(self.embedding_type != 'word_only'):
+            self.total_word_embedding_size = self.word_embedding_size + self.trainable_embedding_size
         else:
             self.total_word_embedding_size = self.word_embedding_size
         
+        self.bi_rnn_hidden_state = int(self.total_word_embedding_size / 2)
+        self.linear_layer_in_size = self.bi_rnn_hidden_state * 2
+        self.attention_linear_layer_out_dim = self.bi_rnn_hidden_state
+        
         if(self.history_size != 0):
-            self.final_question_representation_size = (self.bi_rnn_hidden_state * 2) 
+            self.final_question_representation_size = self.bi_rnn_hidden_state * 2 
         else:
             self.final_question_representation_size = self.bi_rnn_hidden_state * 2

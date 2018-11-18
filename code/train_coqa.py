@@ -108,7 +108,7 @@ for epoch in range(options.epochs):
         
 #         pdb.set_trace()
         
-        total_loss_since_last_time += loss
+        total_loss_since_last_time += loss.item()
         
         loss.backward()
         if(options.max_gradient_norm is not None):
@@ -121,7 +121,7 @@ for epoch in range(options.epochs):
             answer_copy = answer
             train_exact_match = accuracy_score(gt_labels.cpu().numpy(), answer_copy.detach().cpu().numpy().argmax(axis=1))
             
-            avg_loss = total_loss_since_last_time.item()/options.log_every
+            avg_loss = total_loss_since_last_time/options.log_every
             total_loss_since_last_time = 0
 #             answer_sigmoid = torch.sigmoid(answer)
 #             answer_labels = answer_sigmoid > options.decision_threshold

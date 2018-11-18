@@ -69,8 +69,22 @@ num_birnn_layers=1,
 masked attention for sentence representation only
 Dev em =  49. Train acc 75 to 85. Needs regularization
 ------------------------
+
+
+================ Masked attention everywhere except history ================
+
+
+word only, 2 history, lr=0.001, max grad norm=1, Dropout:0.3 
+attention=multiplicative for history encoding and final question representation 
+num_birnn_layers=1, 
+Dev em =  50.29. Train acc 66 to 77
 ------------------------
+2channel word, 2 history, lr=0.001, max grad norm=1, no dropout
+attention=multiplicative for history encoding and final question representation 
+num_birnn_layers=1, 
+Dev em =  42. Train acc 75 to 85. Needs regularization. reducing max grad norm is NOT the issue
 ------------------------
+
 ------------------------
 ------------------------
 ------------------------
