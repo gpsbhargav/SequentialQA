@@ -1,3 +1,7 @@
+Sentence selector on SQuAD:66%. This is like an upper bound on the performance of these models given questions with "complete" information.
+
+
+=======================================================================================
 Word only, 0 history, no regularization, max grad norm=1. lr=0.001. attention=dot
 Dev EM=48.92. Train acc ~65 to 75
 ------------------------
