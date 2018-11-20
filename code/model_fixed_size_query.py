@@ -112,7 +112,7 @@ class SentenceSelector(nn.Module):
             history_aware_question = torch.cat([question,final_history_rep],dim=-1)
             
             history_aware_question = self.question_linear_layer(history_aware_question)
-            history_aware_question = torch.relu(history_aware_question)
+            history_aware_question = torch.tanh(history_aware_question)
         else:
             history_aware_question = question
         

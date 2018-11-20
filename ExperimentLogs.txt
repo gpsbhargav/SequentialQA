@@ -87,8 +87,21 @@ Dev em =  50.29. Train acc 66 to 77
 attention=multiplicative for history encoding and final question representation 
 num_birnn_layers=1, 
 Dev em =  42. Train acc 75 to 85. Needs regularization. reducing max grad norm is NOT the issue
-------------------------
 
+
+
+================ Tanh instead of ReLU when projecting question to lower dimension ================
+
+word only, 2 history, lr=0.001, max grad norm=1, Dropout:0.3 
+attention=multiplicative for history encoding and final question representation 
+num_birnn_layers=1, 
+Dev em =  52. Train acc 68 to 76
+
+------------------------
+word only, 1 history, lr=0.001, max grad norm=1, Dropout:0.25 
+attention=multiplicative for history encoding and final question representation 
+num_birnn_layers=1, 
+Dev em =  49.
 ------------------------
 ------------------------
 ------------------------
