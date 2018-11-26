@@ -63,10 +63,8 @@ class Coqa(Dataset):
             
             
         for i,idx in enumerate(prev_indices):
-            qa_word = self.dataset['questions_word'][idx] + self.dataset['answers_word'][idx]
-            qa_char = self.dataset['questions_char'][idx] + self.dataset['answers_char'][idx]
-            out_dict["history_word_{}".format(i)] = qa_word
-            out_dict["history_char_{}".format(i)] = qa_char
+            out_dict["history_word_{}".format(i)] = self.dataset['histories_word'][idx]
+            out_dict["history_char_{}".format(i)] = self.dataset['histories_char'][idx]
             
         return out_dict
     

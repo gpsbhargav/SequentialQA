@@ -102,7 +102,20 @@ word only, 1 history, lr=0.001, max grad norm=1, Dropout:0.25
 attention=multiplicative for history encoding and final question representation 
 num_birnn_layers=1, 
 Dev em =  49.
+
+
+
+================ 
+Using answer sentences instead of given answer spans in history,
+Removed padding between question and answer in history 
+================
+
+word only, 2history, lr=0.001, max grad norm=1, dropout=0.25
+attention=multiplicative for history encoding and final question representation 
+num_birnn_layers=1, 
+Dev em =  55.11. Train acc 67 to 74
 ------------------------
+
 ------------------------
 ------------------------
 ------------------------
