@@ -113,8 +113,14 @@ Removed padding between question and answer in history
 word only, 2history, lr=0.001, max grad norm=1, dropout=0.25
 attention=multiplicative for history encoding and final question representation 
 num_birnn_layers=1, 
-Dev em =  55.11. Train acc 67 to 74
+Dev em =  55.11. 
+Without teacher forcing= 47.38
 ------------------------
+word only, 0 history, lr=0.001, max grad norm=1, dropout=0.25
+attention=multiplicative for history encoding and final question representation 
+num_birnn_layers=1, 
+Dev em =  51.
+Without teacher forcing(the evaluation script)= 50.74
 
 ------------------------
 ------------------------

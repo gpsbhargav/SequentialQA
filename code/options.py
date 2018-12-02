@@ -6,10 +6,8 @@ class CoqaOptions:
         self.word_embedding_size = 300
         self.trainable_embedding_size = 50  #channel 2 of embeddings. can be char level or word
         self.embedding_type = 'word_only'  # one of 'two_channel_word', 'word_plus_char', 'word_only'
-        self.history_size = 2
-#         self.max_sent_len = 40
+        self.history_size = 0
         self.max_para_len = 25
-#         self.max_word_len = 10
         self.word_vocab_size = 36238
         self.char_vocab_size = 598
         self.char_pad_index = 0
