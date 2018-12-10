@@ -6,13 +6,13 @@ class CoqaOptions:
         self.word_embedding_size = 300
         self.trainable_embedding_size = 50  #channel 2 of embeddings. can be char level or word
         self.embedding_type = 'word_only'  # one of 'two_channel_word', 'word_plus_char', 'word_only'
-        self.history_size = 1
+        self.history_size = 2
         self.max_para_len = 25
         self.word_vocab_size = 36238
         self.char_vocab_size = 598
         self.char_pad_index = 0
         self.word_pad_index = 0
-        self.dropout = 0.25
+        self.dropout = 0.2
         self.recurrent_dropout = 0.2
         self.lr = 0.001
         self.weight_decay = 0

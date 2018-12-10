@@ -108,11 +108,10 @@ class SentenceSelector(nn.Module):
             else:
                 final_history_rep = history_reps_list[0]
             
-            
-            history_aware_question = torch.cat([question,final_history_rep],dim=-1)
-            
-            history_aware_question = self.question_linear_layer(history_aware_question)
-            history_aware_question = torch.tanh(history_aware_question)
+            question_history_concat = torch.cat([question,final_history_rep],dim=-1)
+            history_gate = torch.sigmoid(self.question_linear_layer(question_history_concat))
+            gated_history = history_gate * final_history_rep
+            history_aware_question = question + gated_history
         else:
             history_aware_question = question
         
@@ -189,7 +188,7 @@ class Attn(torch.nn.Module):
         if self.method == 'general':
             self.attn = torch.nn.Linear(hidden_size, hidden_size)
         elif self.method == 'multiplicative':
-            self.attn = torch.nn.Linear(size_of_query , size_of_things_to_attend_to )
+            self.attn = torch.nn.Linear(size_of_query , size_of_things_to_attend_to ,bias=False)
             self.v = torch.nn.Parameter(torch.randn(size_of_things_to_attend_to, requires_grad=True))
         elif self.method == 'concat':
             self.attn = torch.nn.Linear(size_of_things_to_attend_to + size_of_query , options.attention_linear_layer_out_dim)
