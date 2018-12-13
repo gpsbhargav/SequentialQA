@@ -18,7 +18,7 @@ class SentenceSelector(nn.Module):
         
         self.question_encoder =  SequenceEncoder(options, options.total_word_embedding_size, options.total_word_embedding_size, attention_type='dot')
         
-        self.history_item_encoder =  SequenceEncoder(options, options.total_word_embedding_size, options.total_word_embedding_size, attention_type='multiplicative')
+        self.history_item_encoder =  SequenceEncoder(options, options.total_word_embedding_size, options.total_word_embedding_size, attention_type='concat')
         
         
         if(self.options.embedding_type == 'word_plus_char'):
@@ -40,7 +40,7 @@ class SentenceSelector(nn.Module):
         self.question_linear_layer = nn.Linear(options.bi_rnn_hidden_state * 2 * 2, options.bi_rnn_hidden_state * 2, bias=True)
         
         if(self.options.history_size != 0):
-            self.history_attn_model = Attn(options, options.bi_rnn_hidden_state * 2, options.bi_rnn_hidden_state * 2, method='multiplicative')
+            self.history_attn_model = Attn(options, options.bi_rnn_hidden_state * 2, options.bi_rnn_hidden_state * 2, method='concat')
         
         self.sentence_selection_attn_model = Attn(options, options.bi_rnn_hidden_state * 2, options.final_question_representation_size, method='dot')
         
@@ -126,9 +126,9 @@ class SentenceSelector(nn.Module):
         
         paragraph_rep = torch.stack(sent_reps,dim=1)
         
-        paragraph_rep = self.dropout(paragraph_rep)
+#         paragraph_rep = self.dropout(paragraph_rep)
         
-        paragraph_rep, _ = self.rnn(paragraph_rep, rnn_hidden)
+#         paragraph_rep, _ = self.rnn(paragraph_rep, rnn_hidden)
         
         raw_scores = self.sentence_selection_attn_model(history_aware_question.unsqueeze(1), paragraph_rep, normalize_scores=False)
         

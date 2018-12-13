@@ -14,11 +14,14 @@ class SentenceSelector(nn.Module):
         self.word_embedding.weight.data.copy_(torch.from_numpy(weight_matrix))
         self.word_embedding.weight.requires_grad = options.update_word_embeddings
         
-        self.answer_sentence_encoder = SequenceEncoder(options, options.final_question_representation_size, options.total_word_embedding_size, attention_type='dot')
         
-        self.question_encoder =  SequenceEncoder(options, options.total_word_embedding_size, options.total_word_embedding_size, attention_type='dot')
+        self.biatt_answer_sentence_encoder = BiAttentionSequenceEncoder(options, input_size=options.total_word_embedding_size)
+        self.answer_sentence_encoder = Seq2Vec(options, options.final_question_representation_size, options.bi_rnn_hidden_state*2, attention_type='dot')
         
-        self.history_item_encoder =  SequenceEncoder(options, options.total_word_embedding_size, options.total_word_embedding_size, attention_type='multiplicative')
+        self.question_encoder =  Seq2Vec(options, options.bi_rnn_hidden_state*2, options.total_word_embedding_size, attention_type='dot')
+        
+        self.biatt_history_item_encoder = BiAttentionSequenceEncoder(options, input_size=options.total_word_embedding_size)
+        self.history_item_encoder =  Seq2Vec(options, options.bi_rnn_hidden_state*2, options.bi_rnn_hidden_state*2, attention_type='concat')
         
         
         if(self.options.embedding_type == 'word_plus_char'):
@@ -34,14 +37,14 @@ class SentenceSelector(nn.Module):
         elif(self.options.embedding_type == 'two_channel_word'):
             self.word_embedding_channel_2 = nn.Embedding(options.word_vocab_size, options.trainable_embedding_size, padding_idx=None, max_norm=None, norm_type=2, scale_grad_by_freq=False, sparse=False, _weight=None)
         
-        self.rnn = nn.LSTM(input_size= options.bi_rnn_hidden_state * 2, hidden_size=options.bi_rnn_hidden_state, num_layers = options.num_rnn_layers, batch_first = True, dropout = options.recurrent_dropout, bidirectional=True)
+        self.question_rnn = nn.LSTM(input_size= options.total_word_embedding_size, hidden_size=options.bi_rnn_hidden_state, num_layers = options.num_rnn_layers, batch_first = True, dropout = options.recurrent_dropout, bidirectional=True)
         
         
+        self.question_linear_layer = nn.Linear(options.bi_rnn_hidden_state * 2 * 2, options.bi_rnn_hidden_state * 2, bias=True)
         
         if(self.options.history_size != 0):
-            self.history_attn_model = Attn(options, options.bi_rnn_hidden_state * 2, options.bi_rnn_hidden_state * 2, method='multiplicative')
-            self.question_linear_layer = nn.Linear(options.bi_rnn_hidden_state * 2 * (1+self.options.history_size), options.bi_rnn_hidden_state * 2, bias=True)
-        
+            self.history_attn_model = Attn(options, options.bi_rnn_hidden_state * 2, options.bi_rnn_hidden_state * 2, method='concat')
+                
         self.sentence_selection_attn_model = Attn(options, options.bi_rnn_hidden_state * 2, options.final_question_representation_size, method='dot')
         
         self.dropout = nn.Dropout(p=options.dropout, inplace=False)
@@ -86,7 +89,12 @@ class SentenceSelector(nn.Module):
 
         combined_embeddings_input["question"] = self.build_embedding(data["question_word"], data["question_char"])
         
-        mask = self.construct_mask(tensor_in=data["question_word"], padding_index = self.options.word_pad_index)        
+        mask = self.construct_mask(tensor_in=data["question_word"], padding_index = self.options.word_pad_index)
+        
+        
+        question_through_rnn, _ = self.question_rnn(combined_embeddings_input["question"], rnn_hidden)
+        
+        
         question = self.question_encoder(input=combined_embeddings_input["question"], bi_rnn_h0=rnn_hidden, query = None, mask=mask)
         
 
@@ -96,19 +104,28 @@ class SentenceSelector(nn.Module):
             for i in range(self.options.history_size):
                 history_embedding = self.build_embedding(data["history_word_{}".format(i)], data["history_char_{}".format(i)])
                 mask = self.construct_mask(tensor_in=data["history_word_{}".format(i)], padding_index = self.options.word_pad_index)
-                history_encoding = self.history_item_encoder(input=history_embedding, bi_rnn_h0= rnn_hidden, query = question.unsqueeze(1), mask=mask)
+                
+                question_aware_history = self.biatt_history_item_encoder(input=history_embedding, 
+                                                                         bi_rnn_h0=rnn_hidden, 
+                                                                         question=question_through_rnn, 
+                                                                         mask=mask)
+                
+                history_encoding = self.history_item_encoder(input=question_aware_history, bi_rnn_h0= rnn_hidden, query = question.unsqueeze(1), mask=mask)
                 history_reps_list.append(history_encoding)
              
             if(self.options.history_size > 1):
                 history_reps = torch.stack(history_reps_list,dim=1)   
-                final_history_rep = history_reps.flatten(1)
+                attn_weights = self.history_attn_model(question.unsqueeze(1), history_reps)
+                final_history_rep = attn_weights.bmm(history_reps)
+                final_history_rep = final_history_rep.flatten(1)
+                final_history_rep = torch.tanh(final_history_rep)
             else:
                 final_history_rep = history_reps_list[0]
             
-            history_aware_question = torch.cat([question,final_history_rep],dim=-1)
-            
-            history_aware_question = self.question_linear_layer(history_aware_question)
-#             history_aware_question = torch.tanh(history_aware_question)
+            question_history_concat = torch.cat([question,final_history_rep],dim=-1)
+            history_gate = torch.sigmoid(self.question_linear_layer(question_history_concat))
+            gated_history = history_gate * final_history_rep
+            history_aware_question = question + gated_history
         else:
             history_aware_question = question
         
@@ -116,16 +133,16 @@ class SentenceSelector(nn.Module):
         for i in range(self.options.max_para_len):
             combined_embeddings_input = self.build_embedding(data["sent_word_{}".format(i)], data["sent_char_{}".format(i)])
             mask = self.construct_mask(tensor_in=data["sent_word_{}".format(i)], padding_index = self.options.word_pad_index)
-            sent_rep = self.answer_sentence_encoder(input=combined_embeddings_input,
+            question_aware_sentence = self.biatt_answer_sentence_encoder(input=combined_embeddings_input, 
+                                                                         bi_rnn_h0=rnn_hidden, 
+                                                                         question=question_through_rnn, 
+                                                                         mask=mask)
+            sent_rep = self.answer_sentence_encoder(input=question_aware_sentence,
                             bi_rnn_h0=rnn_hidden, query = history_aware_question.unsqueeze(1), mask=mask)
             sent_reps.append(sent_rep)
         
         
         paragraph_rep = torch.stack(sent_reps,dim=1)
-        
-        paragraph_rep = self.dropout(paragraph_rep)
-        
-        paragraph_rep, _ = self.rnn(paragraph_rep, rnn_hidden)
         
         raw_scores = self.sentence_selection_attn_model(history_aware_question.unsqueeze(1), paragraph_rep, normalize_scores=False)
         
@@ -136,13 +153,35 @@ class SentenceSelector(nn.Module):
         
         return raw_scores
         
-    
+
+# Input: sequence of n vectors, question of m vectors
+# output: sequence of n vectors
+class BiAttentionSequenceEncoder(nn.Module):
+    def __init__(self, options, input_size, attention_type = 'concat'):
+        super(BiAttentionSequenceEncoder, self).__init__()
         
+        self.rnn = nn.LSTM(input_size= input_size, hidden_size=options.bi_rnn_hidden_state, num_layers = options.num_rnn_layers, batch_first = True, dropout = options.recurrent_dropout, bidirectional=True)
+        
+        self.bi_attention = BiAttention(options.bi_rnn_hidden_state*2, options.dropout)
+        
+        self.linear = nn.Sequential(
+                nn.Linear(options.bi_rnn_hidden_state*2*4 , options.bi_rnn_hidden_state*2),
+                nn.ReLU()
+            )
+        
+    def forward(self, input, bi_rnn_h0, question, mask = None):
+        seq_rep, _ = self.rnn(input, bi_rnn_h0)
+        seq_rep = self.bi_attention(seq_rep, question, mask)
+        output = self.linear(seq_rep)
+        return output
 
 
-class SequenceEncoder(nn.Module):
+
+# Basically, Hierarchical attention network.
+# Input: sequence of vectors. Output: 1 vector
+class Seq2Vec(nn.Module):
     def __init__(self, options, query_size, input_size, attention_type):
-        super(SequenceEncoder, self).__init__()
+        super(Seq2Vec, self).__init__()
         
         self.rnn = nn.LSTM(input_size= input_size, hidden_size=options.bi_rnn_hidden_state, num_layers = options.num_rnn_layers, batch_first = True, dropout = options.recurrent_dropout, bidirectional=True)
         
@@ -169,6 +208,8 @@ class SequenceEncoder(nn.Module):
         final_seq_rep = final_seq_rep.flatten(1)
         return final_seq_rep
         
+        
+
     
 
     
@@ -185,7 +226,7 @@ class Attn(torch.nn.Module):
         if self.method == 'general':
             self.attn = torch.nn.Linear(hidden_size, hidden_size)
         elif self.method == 'multiplicative':
-            self.attn = torch.nn.Linear(size_of_query , size_of_things_to_attend_to )
+            self.attn = torch.nn.Linear(size_of_query , size_of_things_to_attend_to ,bias=False)
             self.v = torch.nn.Parameter(torch.randn(size_of_things_to_attend_to, requires_grad=True))
         elif self.method == 'concat':
             self.attn = torch.nn.Linear(size_of_things_to_attend_to + size_of_query , options.attention_linear_layer_out_dim)
@@ -231,7 +272,61 @@ class Attn(torch.nn.Module):
             return_value =  attn_energies
         
         return return_value
-        
-        
-            
-            
+    
+    
+    
+# adapted from https://github.com/hotpotqa/hotpot    
+class BiAttention(nn.Module):
+    def __init__(self, input_size, dropout):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout, inplace=False)
+        self.input_linear = nn.Linear(input_size, 1, bias=False)
+        self.memory_linear = nn.Linear(input_size, 1, bias=False)
+
+        self.dot_scale = nn.Parameter(torch.Tensor(input_size).uniform_(1.0 / (input_size ** 0.5)))
+
+    def forward(self, input, memory, mask):
+        bsz, input_len, memory_len = input.size(0), input.size(1), memory.size(1)
+
+        input = self.dropout(input)
+        memory = self.dropout(memory)
+
+        input_dot = self.input_linear(input)
+        memory_dot = self.memory_linear(memory).view(bsz, 1, memory_len)
+        cross_dot = torch.bmm(input * self.dot_scale, memory.permute(0, 2, 1).contiguous())
+        att = input_dot + memory_dot + cross_dot
+        #att = att - 1e30 * (1 - mask[:,None])
+
+        weight_one = torch.softmax(att, dim=-1)
+        output_one = torch.bmm(weight_one, memory)
+        weight_two = torch.softmax(att.max(dim=-1)[0], dim=-1).view(bsz, 1, input_len)
+        output_two = torch.bmm(weight_two, input)
+
+        return torch.cat([input, output_one, input*output_one, output_two*output_one], dim=-1)
+
+    
+# adapted from https://github.com/hotpotqa/hotpot
+class GateLayer(nn.Module):
+    def __init__(self, d_input, d_output):
+        super(GateLayer, self).__init__()
+        self.linear = nn.Linear(d_input, d_output)
+        self.gate = nn.Linear(d_input, d_output)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, input):
+        return self.linear(input) * self.sigmoid(self.gate(input))
+    
+# adapted from https://github.com/hotpotqa/hotpot    
+# class LockedDropout(nn.Module):
+#     def __init__(self, dropout):
+#         super().__init__()
+#         self.dropout = dropout
+
+#     def forward(self, x):
+#         dropout = self.dropout
+#         if not self.training:
+#             return x
+#         m = x.data.new(x.size(0), 1, x.size(2)).bernoulli_(1 - dropout)
+#         mask = torch.tensor(m.div_(1 - dropout), requires_grad=False)
+#         mask = mask.expand_as(x)
+#         return mask * x

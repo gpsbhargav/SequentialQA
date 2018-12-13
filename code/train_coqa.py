@@ -12,7 +12,7 @@ import numpy as np
 from sklearn.metrics import f1_score, accuracy_score
 
 import utils
-from model_fixed_size_query import SentenceSelector
+from model_bi_attention import SentenceSelector
 import options
 
 import pdb
