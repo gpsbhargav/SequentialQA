@@ -137,6 +137,8 @@ num_birnn_layers=1,
 Dev em =  56.52.
 Without teacher forcing(the evaluation script)= 51.3
 
+
+
 ================ 
 No biLSTM across sentence representations
 ================
@@ -148,19 +150,25 @@ Without teacher forcing(the evaluation script)= 50.69
 
 
 ================ 
-No biLSTM across sentence representations
+BiDAF -> HAN 
 ================
 word only, 2 history, lr=0.001, max grad norm=1, dropout=0.2
 Dev em = 62.4
 Without teacher forcing(the evaluation script)= 58.91
-Might be overfitting slightly try dropout of 0.3 or 0.4
-
-
-
-
-
-
 ------------------------
+word only, 0 history, lr=0.001, max grad norm=1, dropout=0.2
+Dev em = 58.04
+
+
+
+================ 
+BiDAF -> HAN -> sentence level BiLSTM
+================
+word only, 2 history, lr=0.001, max grad norm=1, dropout=0.2
+Dev em = 64.6
+Without teacher forcing(the evaluation script)= 60.09
+
+
 ------------------------
 ------------------------
 ------------------------

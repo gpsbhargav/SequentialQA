@@ -89,7 +89,7 @@ options = options.CoqaOptions()
 torch.cuda.set_device(0)
 device = torch.device('cuda:{}'.format(options.gpu))
 
-model_file = options.save_path + "best_snapshot_dev_EM_0.6240761618439183_iter_5943_model.pt"
+model_file = options.save_path + "best_snapshot_dev_EM_0.640611299010397_iter_5943_model.pt"
 in_pkl_name = "preprocessed_dev_no_tf.pkl"
 
 

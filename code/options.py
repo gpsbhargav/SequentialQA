@@ -1,7 +1,7 @@
 class CoqaOptions:
     def __init__(self):
         self.epochs = 30
-        self.batch_size = 64
+        self.batch_size = 128
         self.num_rnn_layers = 1
         self.word_embedding_size = 300
         self.trainable_embedding_size = 50  #channel 2 of embeddings. can be char level or word
@@ -12,7 +12,7 @@ class CoqaOptions:
         self.char_vocab_size = 598
         self.char_pad_index = 0
         self.word_pad_index = 0
-        self.dropout = 0.3
+        self.dropout = 0.25
         self.recurrent_dropout = 0.2
         self.lr = 0.001
         self.weight_decay = 0

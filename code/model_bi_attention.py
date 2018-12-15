@@ -39,6 +39,8 @@ class SentenceSelector(nn.Module):
         
         self.question_rnn = nn.LSTM(input_size= options.total_word_embedding_size, hidden_size=options.bi_rnn_hidden_state, num_layers = options.num_rnn_layers, batch_first = True, dropout = options.recurrent_dropout, bidirectional=True)
         
+        self.sentence_level_rnn = nn.LSTM(input_size= options.bi_rnn_hidden_state*2, hidden_size=options.bi_rnn_hidden_state, num_layers = options.num_rnn_layers, batch_first = True, dropout = options.recurrent_dropout, bidirectional=True)
+        
         
         self.question_linear_layer = nn.Linear(options.bi_rnn_hidden_state * 2 * 2, options.bi_rnn_hidden_state * 2, bias=True)
         
@@ -143,6 +145,10 @@ class SentenceSelector(nn.Module):
         
         
         paragraph_rep = torch.stack(sent_reps,dim=1)
+        
+        paragraph_rep = self.dropout(paragraph_rep)
+        
+        paragraph_rep, _ = self.sentence_level_rnn(paragraph_rep, rnn_hidden)
         
         raw_scores = self.sentence_selection_attn_model(history_aware_question.unsqueeze(1), paragraph_rep, normalize_scores=False)
         
